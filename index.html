@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Цех — СМУ</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        orange: {
+          500: '#ff6b35',
+          600: '#f97316',
+        }
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f7; }
+  .card { background: white; border-radius: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+  .orange-card { background: linear-gradient(135deg, #ff6b35 0%, #ff4500 100%); color: white; }
+  .nav-btn.active { background: #f0f0f0; font-weight: 600; }
+  .status-here { background: #1a1a1a; color: white; }
+  .status-no { background: #f0f0f0; color: #666; }
+  input, select, textarea { outline: none; }
+  .modal { background: rgba(0,0,0,0.5); }
+</style>
+</head>
+<body class="pb-24">
+
+<!-- Top Bar -->
+<div class="bg-white px-4 pt-3 pb-2 sticky top-0 z-20 shadow-sm">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold">Ц</div>
+      <span class="font-semibold text-lg">Цех</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <button onclick="document.getElementById('fileInput').click()" class="p-2 text-gray-600">📤</button>
+      <input type="file" id="fileInput" accept=".xlsx,.xls" class="hidden" onchange="handleExcel(event)">
+      <div class="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold">А</div>
+    </div>
+  </div>
+
+  <!-- Section Selector -->
+  <div class="mt-3 flex gap-2 overflow-x-auto pb-1">
+    <button onclick="setSection('15-16')" id="sec-15-16" class="section-btn px-4 py-1.5 rounded-full text-sm bg-orange-500 text-white whitespace-nowrap">15–16 Финал 1</button>
+    <button onclick="setSection('13-14')" id="sec-13-14" class="section-btn px-4 py-1.5 rounded-full text-sm bg-gray-200 whitespace-nowrap">13–14 Финал 2</button>
+    <button onclick="setSection('12')" id="sec-12" class="section-btn px-4 py-1.5 rounded-full text-sm bg-gray-200 whitespace-nowrap">12 Ремонт</button>
+    <button onclick="setSection('11')" id="sec-11" class="section-btn px-4 py-1.5 rounded-full text-sm bg-gray-200 whitespace-nowrap">11 Заготовки</button>
+  </div>
+</div>
+
+<!-- Navigation -->
+<div class="bg-white mx-4 mt-3 rounded-2xl p-1 flex text-sm">
+  <button onclick="showTab('main')" id="tab-main" class="nav-btn flex-1 py-2 rounded-xl active">Главная</button>
+  <button onclick="showTab('output')" id="tab-output" class="nav-btn flex-1 py-2 rounded-xl">Выработка</button>
+  <button onclick="showTab('docs')" id="tab-docs" class="nav-btn flex-1 py-2 rounded-xl">Документы</button>
+</div>
+<div class="bg-white mx-4 mt-2 rounded-2xl p-1 flex text-sm">
+  <button onclick="showTab('team')" id="tab-team" class="nav-btn flex-1 py-2 rounded-xl">Команда</button>
+  <button onclick="showTab('warehouse')" id="tab-warehouse" class="nav-btn flex-1 py-2 rounded-xl">Склад</button>
+  <button onclick="showTab('profile')" id="tab-profile" class="nav-btn flex-1 py-2 rounded-xl">Профиль</button>
+</div>
+
+<!-- MAIN CONTENT -->
+<div id="content" class="px-4 mt-4">
+  <!-- Will be filled by JS -->
+</div>
+
+<!-- Modal -->
+<div id="modal" class="modal fixed inset-0 hidden items-center justify-center z-50" onclick="if(event.target===this) closeModal()">
+  <div class="bg-white rounded-3xl p-6 mx-4 w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script>
+// ===== DATA =====
+let state = {
+  section: '15-16',
+  employees: JSON.parse(localStorage.getItem('employees') || '[]'),
+  warehouse: JSON.parse(localStorage.getItem('warehouse') || '{"tomorrow":[],"low":[],"improve":[]}'),
+  production: JSON.parse(localStorage.getItem('production') || '{}'),
+  attendance: JSON.parse(localStorage.getItem('attendance') || '{}')
+};
+
+function save() {
+  localStorage.setItem('employees', JSON.stringify(state.employees));
+  localStorage.setItem('warehouse', JSON.stringify(state.warehouse));
+  localStorage.setItem('production', JSON.stringify(state.production));
+  localStorage.setItem('attendance', JSON.stringify(state.attendance));
+}
+
+// Demo data if empty
+if (state.employees.length === 0) {
+  state.employees = [
+    {id:1, tab:89, pos:'Монтажник РЭА', name:'Думин Максим Вадимович', section:'15-16', shift:'2/2 1 смена', phone:'+7 900 000-00-01', status:'here'},
+    {id:2, tab:81, pos:'Монтажник РЭА', name:'Пучков Алексей Ильич', section:'15-16', shift:'2/2 1 смена', phone:'+7 900 000-00-02', status:'here'},
+    {id:3, tab:133, pos:'Сборщик', name:'Засухин Егор Леонидович', section:'13-14', shift:'2/2 2 смена', phone:'+7 900 000-00-03', status:'no'},
+    {id:4, tab:140, pos:'Монтажник РЭА', name:'Шмелев-Михайлов Иван', section:'12', shift:'5/2', phone:'+7 900 000-00-04', status:'here'},
+  ];
+  save();
+}
+
+const sections = {
+  '15-16': 'Финальная сборка 1',
+  '13-14': 'Финальная сборка 2',
+  '12': 'Участок ремонта',
+  '11': 'Участок заготовок'
+};
+
+// ===== UI =====
+function setSection(sec) {
+  state.section = sec;
+  document.querySelectorAll('.section-btn').forEach(b => b.className = 'section-btn px-4 py-1.5 rounded-full text-sm bg-gray-200 whitespace-nowrap');
+  document.getElementById('sec-'+sec).className = 'section-btn px-4 py-1.5 rounded-full text-sm bg-orange-500 text-white whitespace-nowrap';
+  render();
+}
+
+function showTab(tab) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-'+tab)?.classList.add('active');
+  state.currentTab = tab;
+  render();
+}
+
+function render() {
+  const tab = state.currentTab || 'main';
+  const content = document.getElementById('content');
+  const today = new Date().toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
+
+  if (tab === 'main') {
+    const prod = state.production[state.section] || {percent:29, minutes:1043, plan:3600, product:701, inWork:14, waiting:9, repaired:11, waitRepair:4};
+    const team = state.employees.filter(e => e.section === state.section);
+    const here = team.filter(e => e.status === 'here').length;
+
+    content.innerHTML = `
+      <div class="mb-4">
+        <h1 class="text-2xl font-bold">Добро пожаловать, Амир</h1>
+        <p class="text-gray-500 text-sm">${today}</p>
+        <p class="text-xs text-orange-500 mt-1">${sections[state.section]}</p>
+      </div>
+
+      <div class="orange-card card p-5 mb-4">
+        <div class="text-sm opacity-90">Выработка участка</div>
+        <div class="text-5xl font-bold mt-1">${prod.percent}%</div>
+        <div class="text-sm mt-1">${prod.minutes} / ${prod.plan} мин · птиц ${prod.product || 9}</div>
+        <div class="mt-3 h-1.5 bg-white/30 rounded-full overflow-hidden">
+          <div class="h-full bg-white rounded-full" style="width:${prod.percent}%"></div>
+        </div>
+      </div>
+
+      <div class="card p-4 mb-3">
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-gray-500 text-sm">Продукт</div>
+            <div class="text-3xl font-bold">${prod.product || 701}</div>
+          </div>
+          <div class="text-right text-xs text-gray-500">Собрано по журналу,<br>финальная пайка</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <div class="card p-4"><div class="text-gray-500 text-sm">В работе</div><div class="text-3xl font-bold">${prod.inWork}</div></div>
+        <div class="card p-4"><div class="text-gray-500 text-sm">Ждут</div><div class="text-3xl font-bold">${prod.waiting}</div></div>
+        <div class="card p-4"><div class="text-gray-500 text-sm">Отремонтировано</div><div class="text-3xl font-bold">${prod.repaired}</div></div>
+        <div class="card p-4"><div class="text-gray-500 text-sm">Ждут ремонта</div><div class="text-3xl font-bold">${prod.waitRepair}</div></div>
+      </div>
+
+      <button onclick="alert('Функция «Править партию» будет в следующей версии')" class="w-full card py-3 text-center font-medium mb-4">Править партию</button>
+
+      <div class="card p-4">
+        <div class="flex justify-between items-center mb-3">
+          <span class="font-semibold">Посещаемость</span>
+          <span class="text-sm text-gray-500">${here} из ${team.length} на месте</span>
+        </div>
+        ${team.slice(0,6).map(e => `
+          <div class="flex items-center justify-between py-2 border-b last:border-0">
+            <div>
+              <div class="font-medium">${e.name}</div>
+              <div class="text-xs text-gray-500">${e.pos} · Линия ${e.section}</div>
+            </div>
+            <span class="px-3 py-1 rounded-full text-xs ${e.status==='here'?'status-here':'status-no'}">${e.status==='here'?'Здесь':'Нет'}</span>
+          </div>
+        `).join('')}
+        ${team.length > 6 ? `<div class="text-center text-sm text-gray-400 mt-2">и ещё ${team.length-6}</div>` : ''}
+      </div>
+    `;
+  }
+
+  else if (tab === 'team') {
+    const team = state.employees.filter(e => e.section === state.section);
+    content.innerHTML = `
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold">Команда · ${sections[state.section]}</h2>
+        <button onclick="openEmployeeModal()" class="bg-orange-500 text-white px-4 py-2 rounded-full text-sm">+ Добавить</button>
+      </div>
+      ${team.map(e => `
+        <div class="card p-4 mb-3">
+          <div class="flex justify-between">
+            <div>
+              <div class="font-semibold">${e.name}</div>
+              <div class="text-sm text-gray-500">${e.pos} · Таб. ${e.tab}</div>
+              <div class="text-xs text-gray-400 mt-1">${e.shift} · ${e.phone || '—'}</div>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="editEmployee(${e.id})" class="text-blue-500 text-sm">Изм.</button>
+              <button onclick="deleteEmployee(${e.id})" class="text-red-500 text-sm">Удал.</button>
+            </div>
+          </div>
+        </div>
+      `).join('') || '<div class="text-center text-gray-400 py-10">Нет сотрудников на этом участке</div>'}
+    `;
+  }
+
+  else if (tab === 'warehouse') {
+    const w = state.warehouse;
+    content.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">Склад</h2>
+
+      <div class="card p-4 mb-3">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-semibold">Нужно заказать на завтра</span>
+          <button onclick="addWarehouse('tomorrow')" class="text-orange-500 text-sm">+ Добавить</button>
+        </div>
+        ${(w.tomorrow||[]).map((item,i) => `
+          <div class="flex justify-between py-2 border-b text-sm">
+            <span>${item.name} — ${item.qty} шт</span>
+            <button onclick="removeWarehouse('tomorrow',${i})" class="text-red-400">×</button>
+          </div>
+        `).join('') || '<div class="text-gray-400 text-sm">Пусто</div>'}
+      </div>
+
+      <div class="card p-4 mb-3">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-semibold">Мало на складе</span>
+          <button onclick="addWarehouse('low')" class="text-orange-500 text-sm">+ Добавить</button>
+        </div>
+        ${(w.low||[]).map((item,i) => `
+          <div class="flex justify-between py-2 border-b text-sm">
+            <span>${item.name} — остаток ${item.qty}</span>
+            <button onclick="removeWarehouse('low',${i})" class="text-red-400">×</button>
+          </div>
+        `).join('') || '<div class="text-gray-400 text-sm">Пусто</div>'}
+      </div>
+
+      <div class="card p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-semibold">Заказать для улучшения производства</span>
+          <button onclick="addWarehouse('improve')" class="text-orange-500 text-sm">+ Добавить</button>
+        </div>
+        ${(w.improve||[]).map((item,i) => `
+          <div class="flex justify-between py-2 border-b text-sm">
+            <span>${item.name} — ${item.qty} шт</span>
+            <button onclick="removeWarehouse('improve',${i})" class="text-red-400">×</button>
+          </div>
+        `).join('') || '<div class="text-gray-400 text-sm">Пусто</div>'}
+      </div>
+    `;
+  }
+
+  else if (tab === 'docs') {
+    content.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">Документы</h2>
+      <div class="card p-6 text-center text-gray-500">
+        <div class="text-4xl mb-2">📄</div>
+        Технические карты, требования и методики<br>по изготовлению и ремонту
+        <div class="mt-4 text-sm">Загрузка файлов будет добавлена в следующей версии<br>(пока можно хранить ссылки)</div>
+      </div>
+    `;
+  }
+
+  else if (tab === 'output') {
+    content.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">Выработка</h2>
+      <div class="card p-4 mb-3">
+        <div class="flex gap-2 mb-4">
+          <button class="px-4 py-1 rounded-full bg-black text-white text-sm">Дни</button>
+          <button class="px-4 py-1 rounded-full bg-gray-200 text-sm">Недели</button>
+          <button class="px-4 py-1 rounded-full bg-gray-200 text-sm">Месяцы</button>
+        </div>
+        <div class="text-center text-gray-400 py-10">Нажмите на день — откроется выработка и разбор плана.<br><br>Данные подтянутся после загрузки Excel.</div>
+      </div>
+    `;
+  }
+
+  else if (tab === 'profile') {
+    content.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">Профиль</h2>
+      <div class="card p-6">
+        <div class="text-center">
+          <div class="w-20 h-20 rounded-full bg-orange-500 mx-auto flex items-center justify-center text-white text-3xl font-bold">А</div>
+          <div class="mt-3 font-semibold text-lg">Амир Калачев</div>
+          <div class="text-sm text-gray-500">Мастер СМУ</div>
+        </div>
+        <div class="mt-6 text-sm text-gray-600">
+          <div class="py-2 border-b">Участки: 11, 12, 13–14, 15–16</div>
+          <div class="py-2">Данные хранятся локально в браузере.<br>Для облака подключите Supabase (инструкция будет).</div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+// ===== EMPLOYEES =====
+function openEmployeeModal(emp = null) {
+  const isEdit = !!emp;
+  document.getElementById('modalContent').innerHTML = `
+    <h3 class="text-lg font-bold mb-4">${isEdit ? 'Редактировать' : 'Добавить'} сотрудника</h3>
+    <div class="space-y-3">
+      <input id="m-tab" placeholder="Табельный №" value="${emp?.tab||''}" class="w-full border rounded-xl px-4 py-3">
+      <input id="m-name" placeholder="ФИО" value="${emp?.name||''}" class="w-full border rounded-xl px-4 py-3">
+      <select id="m-pos" class="w-full border rounded-xl px-4 py-3">
+        <option ${emp?.pos==='Мастер'?'selected':''}>Мастер</option>
+        <option ${emp?.pos==='Бригадир'?'selected':''}>Бригадир</option>
+        <option ${emp?.pos==='Монтажник РЭА'?'selected':''}>Монтажник РЭА</option>
+        <option ${emp?.pos==='Сборщик'?'selected':''}>Сборщик</option>
+      </select>
+      <select id="m-section" class="w-full border rounded-xl px-4 py-3">
+        <option value="15-16" ${emp?.section==='15-16'?'selected':''}>15–16 Финал 1</option>
+        <option value="13-14" ${emp?.section==='13-14'?'selected':''}>13–14 Финал 2</option>
+        <option value="12" ${emp?.section==='12'?'selected':''}>12 Ремонт</option>
+        <option value="11" ${emp?.section==='11'?'selected':''}>11 Заготовки</option>
+      </select>
+      <select id="m-shift" class="w-full border rounded-xl px-4 py-3">
+        <option ${emp?.shift==='2/2 1 смена'?'selected':''}>2/2 1 смена</option>
+        <option ${emp?.shift==='2/2 2 смена'?'selected':''}>2/2 2 смена</option>
+        <option ${emp?.shift==='5/2'?'selected':''}>5/2</option>
+      </select>
+      <input id="m-phone" placeholder="Телефон" value="${emp?.phone||''}" class="w-full border rounded-xl px-4 py-3">
+    </div>
+    <div class="flex gap-3 mt-6">
+      <button onclick="closeModal()" class="flex-1 py-3 rounded-xl bg-gray-200">Отмена</button>
+      <button onclick="saveEmployee(${emp?.id||0})" class="flex-1 py-3 rounded-xl bg-orange-500 text-white">Сохранить</button>
+    </div>
+  `;
+  document.getElementById('modal').classList.remove('hidden');
+  document.getElementById('modal').classList.add('flex');
+}
+
+function saveEmployee(id) {
+  const emp = {
+    id: id || Date.now(),
+    tab: document.getElementById('m-tab').value,
+    name: document.getElementById('m-name').value,
+    pos: document.getElementById('m-pos').value,
+    section: document.getElementById('m-section').value,
+    shift: document.getElementById('m-shift').value,
+    phone: document.getElementById('m-phone').value,
+    status: 'here'
+  };
+  if (id) {
+    const idx = state.employees.findIndex(e => e.id === id);
+    if (idx !== -1) state.employees[idx] = {...state.employees[idx], ...emp};
+  } else {
+    state.employees.push(emp);
+  }
+  save();
+  closeModal();
+  render();
+}
+
+function editEmployee(id) {
+  const emp = state.employees.find(e => e.id === id);
+  if (emp) openEmployeeModal(emp);
+}
+
+function deleteEmployee(id) {
+  if (confirm('Удалить сотрудника?')) {
+    state.employees = state.employees.filter(e => e.id !== id);
+    save();
+    render();
+  }
+}
+
+// ===== WAREHOUSE =====
+function addWarehouse(type) {
+  const name = prompt('Наименование / артикул:');
+  if (!name) return;
+  const qty = prompt('Количество:');
+  if (!qty) return;
+  if (!state.warehouse[type]) state.warehouse[type] = [];
+  state.warehouse[type].push({name, qty});
+  save();
+  render();
+}
+
+function removeWarehouse(type, index) {
+  state.warehouse[type].splice(index, 1);
+  save();
+  render();
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('modal').classList.remove('flex');
+}
+
+// ===== EXCEL IMPORT =====
+function handleExcel(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    const data = new Uint8Array(ev.target.result);
+    const workbook = XLSX.read(data, {type: 'array'});
+    
+    // Simple parser - takes report sheet for production numbers
+    if (workbook.Sheets['отчет']) {
+      const sheet = workbook.Sheets['отчет'];
+      const json = XLSX.utils.sheet_to_json(sheet, {header:1});
+      // Find last non-empty row with data
+      for (let i = json.length-1; i >= 0; i--) {
+        if (json[i] && json[i][1] && typeof json[i][1] === 'number' && json[i][1] > 0) {
+          const row = json[i];
+          state.production[state.section] = {
+            percent: row[2] || 0,
+            minutes: Math.round((row[2]||0)/100 * 3600),
+            plan: 3600,
+            product: row[6] || 0,
+            inWork: 14,
+            waiting: 9,
+            repaired: row[7] || 0,
+            waitRepair: 4
+          };
+          break;
+        }
+      }
+    }
+
+    // Parse attendance if present
+    if (workbook.Sheets['Явка']) {
+      const sheet = workbook.Sheets['Явка'];
+      const json = XLSX.utils.sheet_to_json(sheet, {header:1});
+      // Basic: mark people as present if they have non-zero in recent columns
+      // (simplified for prototype)
+    }
+
+    save();
+    alert('Excel загружен! Данные обновлены для текущего участка.');
+    render();
+  };
+  reader.readAsArrayBuffer(file);
+  e.target.value = '';
+}
+
+// Init
+state.currentTab = 'main';
+render();
+</script>
+</body>
+</html>
